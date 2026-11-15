@@ -555,53 +555,90 @@ export default function App() {
   }, [attendance, holidays, month, year]);
 
   const [syncStatus, setSyncStatus] = useState(null);
+  const [syncError, setSyncError] = useState(null);
 
-  async function syncToSheets() {
+  const API_URL = "http://localhost:3001/api/slip";
+
+  async function syncToExcel() {
     setSyncStatus("loading");
+    setSyncError(null);
     try {
-      const kehadiranRows = [];
-      for (const emp of EMPLOYEES) {
-        const hols = getHolidaysForEmp(emp.id);
-        for (const day of allDays) {
-          if (hols.includes(day)) continue;
-          const att = getAttendance(emp.id, day);
-          if (!att) continue;
-          kehadiranRows.push([
-            MONTHS[month], year, emp.name, day,
-            att === "present" ? "Hadir" : "Absen",
-            ""
-          ]);
-        }
-      }
+      const now = new Date();
+      const saveTimestamp = now.toLocaleString("id-ID");
+      const uniqueSaveId = Date.now();
 
-      const rekapRows = EMPLOYEES.map(emp => {
+      const slips = EMPLOYEES.map((emp, index) => {
         const s = summaries[emp.id];
-        return [MONTHS[month], year, emp.name, s.presentDays, s.absentDays, s.baseGaji, s.bonusPct + "%", s.bonus, s.total];
+        return {
+          id: `SLIP-${uniqueSaveId}-${index + 1}-${emp.id}`,
+          periode_bulan: MONTHS[month],
+          periode_tahun: year,
+          karyawan_id: emp.id,
+          nama_karyawan: emp.name,
+          jabatan: emp.role,
+          tarif_harian: emp.rate,
+          hari_hadir: s.presentDays,
+          hari_absen: s.absentDays,
+          gaji_dasar: s.baseGaji,
+          bonus_persen: `${s.bonusPct}%`,
+          bonus_nominal: s.bonus,
+          total_gaji: s.total,
+          created_at: saveTimestamp
+        };
       });
 
-      const payload = { kehadiran: kehadiranRows, rekap: rekapRows };
-      const encoded = encodeURIComponent(JSON.stringify(payload));
-      await fetch(`${SHEET_URL}?data=${encoded}`, { method: "GET", mode: "no-cors" });
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slips })
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || "Gagal menyimpan ke database Excel.");
+      }
 
       setSyncStatus("ok");
       setTimeout(() => setSyncStatus(null), 3000);
-    } catch {
+    } catch (err) {
       setSyncStatus("error");
-      setTimeout(() => setSyncStatus(null), 4000);
+      setSyncError(err.message);
     }
   }
 
-  async function syncSlipToSheets(emp) {
+  async function syncSlipToExcel(emp) {
     const s = summaries[emp.id];
-    const slip = [
-      new Date().toLocaleDateString("id-ID"),
-      MONTHS[month], year, emp.name,
-      s.presentDays, s.absentDays, s.baseGaji, s.bonusPct + "%", s.bonus, s.total
-    ];
+    const now = new Date();
+    const slip = {
+      id: `SLIP-${now.getTime()}-${emp.id}`,
+      periode_bulan: MONTHS[month],
+      periode_tahun: year,
+      karyawan_id: emp.id,
+      nama_karyawan: emp.name,
+      jabatan: emp.role,
+      tarif_harian: emp.rate,
+      hari_hadir: s.presentDays,
+      hari_absen: s.absentDays,
+      gaji_dasar: s.baseGaji,
+      bonus_persen: `${s.bonusPct}%`,
+      bonus_nominal: s.bonus,
+      total_gaji: s.total,
+      created_at: now.toLocaleString("id-ID")
+    };
+
     try {
-      const encoded = encodeURIComponent(JSON.stringify({ slip }));
-      await fetch(`${SHEET_URL}?data=${encoded}`, { method: "GET", mode: "no-cors" });
-    } catch { /* ignore */ }
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slips: [slip] })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert("⚠️ Perhatian: " + (data.message || "Gagal menyimpan slip ke database Excel."));
+      }
+    } catch (err) {
+      console.error("Gagal terhubung ke backend database:", err);
+    }
   }
 
   return (
@@ -765,10 +802,14 @@ export default function App() {
         {/* Tab: Rekap */}
         {tab === "rekap" && (
           <div className="rekap-card animate-fade">
-            <div style={{padding:'20px 24px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--border-color)'}}>
-              <h2 style={{fontSize:'18px', fontWeight:700}}>Rekapitulasi Gaji</h2>
-              <button className="btn btn-primary" onClick={syncToSheets} disabled={syncStatus === 'loading'}>
-                {syncStatus === 'loading' ? 'Menyinkronkan...' : 'Sync ke Sheets'}
+            <div style={{padding:'20px 24px', display:'flex', justifyContent:'space-between', alignItems:'center', borderBottom:'1px solid var(--border-color)', flexWrap:'wrap', gap:'12px'}}>
+              <div>
+                <h2 style={{fontSize:'18px', fontWeight:700}}>Rekapitulasi Gaji (Excel Database)</h2>
+                {syncStatus === 'ok' && <span style={{fontSize:'12px', color:'var(--accent-emerald)', fontWeight:600}}>✓ Berhasil disimpan ke Excel!</span>}
+                {syncStatus === 'error' && <span style={{fontSize:'12px', color:'var(--accent-rose)', fontWeight:600}}>⚠️ {syncError || "Gagal menyimpan."}</span>}
+              </div>
+              <button className="btn btn-primary" onClick={syncToExcel} disabled={syncStatus === 'loading'}>
+                {syncStatus === 'loading' ? 'Menyinkronkan...' : '💾 Simpan ke Excel'}
               </button>
             </div>
             <table className="rekap-table">
@@ -839,7 +880,7 @@ export default function App() {
                 </div>
               </div>
               <div style={{padding:'0 24px 24px', display:'flex', gap:'8px'}}>
-                <button className="btn btn-primary" style={{flex:1}} onClick={() => { syncSlipToSheets(emp); window.print(); }}>Cetak PDF</button>
+                <button className="btn btn-primary" style={{flex:1}} onClick={() => { syncSlipToExcel(emp); window.print(); }}>Cetak PDF</button>
                 <button className="btn btn-secondary" onClick={() => setSlipTarget(null)}>Tutup</button>
               </div>
             </div>
