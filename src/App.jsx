@@ -515,9 +515,11 @@ export default function App() {
       }
     }
 
-    const gajiPokok30 = emp.rate * 30;
-    const potongan = emp.id === "bili" ? potonganHari * emp.rate : 0;
-    const baseGaji = gajiPokok30 - potongan;
+    let paidDays = presentDays;
+    if (emp.id === "bili") {
+      paidDays = presentDays + Math.min(biliExtraAbsent, 2);
+    }
+    const baseGaji = paidDays * emp.rate;
 
     let bonusPct;
     if (emp.id === "bili") {
@@ -536,8 +538,6 @@ export default function App() {
       presentDays,
       absentDays: emp.id === "bili" ? biliExtraAbsent : absentDays,
       potonganHari,
-      gajiPokok30,
-      potongan,
       baseGaji,
       bonusPct,
       bonusHangus,
